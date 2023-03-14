@@ -1,0 +1,55 @@
+{
+    http_port 8080
+
+    order authorize before basicauth
+
+    security {
+        authorization policy reader_db_policy {
+            crypto key verify from file {env.JWT_SHARED_KEY}
+            crypto key token name connect.sid
+
+            acl rule {
+                comment allow users
+                match role authp/reader
+                allow stop log info
+            }
+            acl rule {
+                comment default deny
+                match any
+                deny stop log warn
+            }
+        }
+
+        authorization policy writer_db_policy {
+            crypto key verify from file {env.JWT_SHARED_KEY}
+            crypto key token name connect.sid
+
+            acl rule {
+                comment allow users
+                match role authp/writer
+                allow stop log info
+            }
+            acl rule {
+                comment default deny
+                match any
+                deny stop log warn
+            }
+        }
+    }
+}
+
+*:8080 {
+    route /auth {
+        reverse_proxy {env.AUTH_SERVER_PROXY_HOST}:{env.AUTH_SERVER_PROXY_PORT}
+    }
+
+    route /reader {
+        authorize with reader_db_policy
+        respond * "reader - hello world!" 200
+    }
+
+    route /writer {
+        authorize with writer_db_policy
+        respond * "writer - hello world!" 200
+   }
+}

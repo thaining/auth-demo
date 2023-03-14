@@ -1,0 +1,41 @@
+version: "3.9"
+services:
+  # caddy-server and auth-server take files from ./common
+  # and need the modified build context
+  caddy-server:
+    build:
+      context: .
+      dockerfile: ./caddy-server/Dockerfile
+    networks:
+      - default
+      - midtier
+    ports:
+      - 8080:8080
+  auth-server:
+    build:
+      context: .
+      dockerfile: ./auth-server/Dockerfile
+    networks:
+      - midtier
+      - backend
+    environment:
+      - AUTH_BCUP_MASTER_PASSWORD=srirachaBear
+  ldap-server:
+    build: ./ldap-server
+    networks:
+      - backend
+    environment:
+      - LDAP_ADMIN_USERNAME=admin
+      - LDAP_ADMIN_PASSWORD=adminpassword
+      - LDAP_USERS=customuser,user01,user02
+      - LDAP_PASSWORDS=custompassword,user01pass,user02pass
+      - AUTH_LDAP_DB_READERS=user01,user02
+      - AUTH_LDAP_DB_WRITERS=user02
+
+networks:
+  midtier:
+    driver: overlay
+    attachable: true
+  backend:
+    driver: overlay
+    attachable: true

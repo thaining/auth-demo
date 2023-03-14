@@ -1,0 +1,13 @@
+{
+    "url":"ldap://ldap-server:1389",
+    "bindDN":"cn=admin,dc=example,dc=org",
+    "bindCredentials":"adminpassword",
+    "searchBase":"ou=users,dc=example,dc=org",
+    "searchFilter":"(cn={{username}})",
+    "groupSearchBase":"ou=users,dc=example,dc=org",
+    "groupSearchFilter":"(&(objectClass=groupOfNames)(cn=db_*)(member=cn={{username}},ou=users,dc=example,dc=org))",
+    "groupSearchScope":"sub",
+    "groupSearchAttributes": ["cn"],
+    "dbReaderGroup":"db_readers",
+    "dbWriterGroup":"db_writers"
+}
