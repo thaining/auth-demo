@@ -60,6 +60,7 @@ including that have stacks like Nodejs pre-built.  The stack is developed a work
 RHEL 9 docker containers because the kernel ABIs are incompatible.  RHEL 8 containers were used instead.
 
 The initial REST interface is just boiled down to three essential calls:
+
 ```
 /auth
 
@@ -176,6 +177,7 @@ The Group name where matching passwords can be found
 
 Several environment variables are used to specify names or locations of files within Docker 
 containers.  These are:
+
 ```
 AUTH_BCUP_FILE_NAME (default: /opt/app-root/src/authPassword.bcup)
 The path to the Buttercup vault file inside the auth-server Docker container.
@@ -192,6 +194,7 @@ The path used by the Express framework when it uses a backing File Store (see da
 ```
 In addition to environment variables, the `passport-ldapauth` Passport Strategy is configured 
 using a JSON file (see `AUTH_CONFIG_PATH` above.)  The values in this file are:
+
 ```
 url 
 The ldap URI for the OpenLDAP server in the identity tier.
@@ -221,6 +224,7 @@ dbWriterGroup
 The name of the LDAP group to which users with the authp/writers role belong see: AUTH_LDAP_WRITER_GROUP
 ```
 There are also a number of miscellaneous environment variables that impact the configuration by impacting service types and addresses:
+
 ```
 AUTH_SESSION_STORE_TYPE (default: memcacheStore)
 The type of Express session backing store type (values: memcacheStore, fileStore)
@@ -252,11 +256,13 @@ docker compose build
 ```
 
 Starting the cluster is a single command:
+
 ```
 docker compose up
 ```
 
 This is how it looks to startup:
+
 ```docker compose up
 [+] Running 6/6
  ⠿ Network auth-demo_midtier           Created                                                                                       0.0s
@@ -329,6 +335,7 @@ The following part of the Caddyfile implements the HTTP interface:
 
 Four default sets of credentials are created, two in the file `auth-server/authPasswords.bcup` and two in the LDAP. The Buttercup 
 credentials can be modified with the [Buttercup Password Manager](https://buttercup.pw/).  The defaults are:
+
 ```
 #Buttercup
 bcupUser01 / bcupUser01pass
@@ -344,6 +351,7 @@ db_writer: user02, bcupUser02
 ```
 
 The auth interface can be tested using `curl`:
+
 ```
 curl -kv -c cookiejar -H "Content-Type: application/json" -X POST --data '{"xiusername":"bcupUser02", "xipassword":"bcupUser02pass"}' http://localhost:8080/auth
 Note: Unnecessary use of -X or --request, POST is already inferred.
@@ -377,6 +385,7 @@ OK
 ```
 
 That produces the following JWT payload:
+
 ```
 {
   "nonce": "YXcp3Y9_YPdFEi3AfePyBg",
@@ -456,7 +465,6 @@ Note: Unnecessary use of -X or --request, GET is already inferred.
 < 
 * Connection #0 to host localhost left intact
 Found
-
 ```
 
 ## Performance and Scaling
@@ -493,12 +501,14 @@ across multiple instances.  It doesn't look like memcached instances can be adde
 provision for peak capaacity.
 
 There are three configuration points required to scale deployment.  The first is the Caddy proxy configuration:
+
 ```
     route /auth {
         reverse_proxy auth-server:12123
     }
 ```
 This needs to be modified to something that looks more like this:
+
 ```
     route /auth {
         reverse_proxy auth-server-auth-demo-1:12123 auth-server-auth-demo-2:12123 {
@@ -512,6 +522,7 @@ single, poorly formatted upstream that fails.  This means that the Caddyfile its
 start.  That's quite possible, but requires some rewriting of the Caddy startup logic in the Dockerfile and elsewhere.
 
 The second touch point is in the `connect-memcached` configuration in the auth-server:
+
 ```
 var authMemCacheHost = process.env.AUTH_MEMCACHE_HOST || '127.0.0.1';
 var authMemCachePort = process.env.AUTH_MEMCACHE_PORT || '11211';
@@ -524,6 +535,7 @@ var memCachedOpts = {
 Here the code can be easily configured to turn a single environment variable into the data needed to configure the backend.   The problem
 here becomes one more related to networking.  Traffic on the current localhost configuration is guaranteed to be private.  It is 
 straightforward to alter that configuration to look like this:
+
 ```
 var memCachedOpts = {
     hosts: [ 'auth-server-auth-demo-1:12123', 'auth-server-auth-demo-2:12123' ],
@@ -535,6 +547,7 @@ the `midtier` network when it more securely should end up on a private network. 
 placed in separate containers in separate containers that communicate with the authentication tier via a new private network.
 
 The last touch point is where the authentication tier sets up the LDAP connection:
+
 ```
     "url":"ldap://ldap-server:1389",
 ```
@@ -550,3 +563,492 @@ now simplify this problem, but doing it the "old, hard" way could provide a refr
 - systemctl configuration
 - AMI building
 - EC2 deployment
+
+# auth-demo Phase II
+
+## Introduction
+
+Given the development of the docker-based solution during the earlier round of development, a natural extension of that project is to deploy
+it in the cloud.  One very natural way to accomplish that would be to assign the docker container of each tier to
+to a virtual machine or other container, deal with cloud-based security and routing, and call the deployment done.  In fact, this solution
+is so popular that services like AWS Fargate or Kubernetes exist to do this in a lightweight and serverless manner.
+
+That is not the route I chose to take however.  While that is a useful exercise in terms of modern cloud deployment, I wanted to reacquaint
+myself with certain technical aspects of system management and deployment.  These apsects included software package development and release,
+system service control, shell programming, and the basics of cloud security that a serverless approach would easily step over.  The result
+is an older and perhaps more granular approach to multi-tier deployment but a useful exercise none the less.
+
+Given the development of the docker-based solution during the earlier round of development, a natural extension of that project is to deploy
+it in the cloud.  One very natural way to accomplish that would be to assign the docker container of each tier to
+to a virtual machine or other container, deal with cloud-based security and routing, and call the deployment done.  In fact, this solution
+is so popular that services like AWS Fargate or Kubernetes exist to do this in a lightweight manner.
+
+I chose not to take that route however.  While Docker in the cloud is a useful exercise, I wanted to reacquaint
+myself with certain technical aspects of system management and deployment.  These apsects included software package development and release,
+system service control, shell programming, and the basics of cloud security that a serverless approach would easily step over.  The result
+is an older and perhaps more granular approach to multi-tier deployment but still a useful learning exercise.
+
+
+## Design Considerations
+
+The design I settled on has the following features:
+
+1. I use AWS CloudFormation to deploy stacks of virtual machines.  This is done to reacquaint myself with the JSON/YAML-based configuration
+methods that Amazon cloud services historically seem to prefer.  At the same time, CloudFormation represented infrastructure that simplified
+certain aspects of virtual machine creation much as Docker did.
+
+2. I chose to use Amazon Linux 2023 as the base operating system for all the virtual machines.  The motive was primarily economic -- Amazon
+offers it as their first choice for free-tier development.  I also have a long history with RPM-based based distributions such as RedHat and
+CentOS distributions, and Amazon Linux allowed me to reacquaint myself with some of those skills.
+
+3. I chose to use systemd to create virtual machine services where possbile for multiple reasons.  First, it's the future where initd scripts
+are the past.  Second, it connects to kernel-based performance management capabilities that initd cannot (which were not necessary here, but
+it was good to reacquaint myself.)  Last, systemd and supervisord share DNA; translating the supervisord configuration used in the Docker phase
+was sraightforward.
+
+
+4. I deliberately didn't go deep with respect to security by only managing access with AWS security groups.  The Docker approach used multiple
+networks to protect traffic and segregate connections.  CloudFormation should allow use of the same approach.  I wanted to get to a
+running stack if possible without worrying about creating the additional infrastructure.  Now that it's done, creating the networks should be a
+reasonable extension.
+
+The general approach to creating each service tier is as follows:
+
+1. Create an RPM to install the necessary software for each tier.  In the case of the LDAP tier just meant installing and configuring the
+existing OpenLDAP service.  For NodeJS, it meant installing a recent version and managing nodejs modules. Caddy is a single, static binary
+file; once the work of building it is done, deployment requires a minimal amount of configuration.
+
+2. Put the service RPMs in a RPM repository where they can be installed during virtual machine creation.  The installation of each service is
+a lightweight process.  The most time consuming part of the installation is refreshing the RPM repo cache to access the new repository prior
+to the initial RPM installation.  That time would be saved by creating a machine image instead, but using an AMI adds the weight of managing
+AMIs.  That's a choice to could be made, but this solution is not yet complex enough to require making it.
+
+3. CloudFormation creates collects configuration information and writes out the necessary configuration files.  In general, the information
+is passed to services via environment variables.  The systemd `Environment` and `EnvironmentFile` directives make this simple.  In the case of
+the auth layer, data is also written into a JSON configuration file.
+
+4. Services generally run at the least level of privilege using specially created accounts.  The configuration information is meant to be
+read only by the services since some of it includes passwords and access to security keys.  In this way, compromise of the service means
+(at most) the acquisition of some useful information.  It does not allow that information to be replaced with other, more compromising
+information unless the service virtual machine is further compromised... at which point all is potentially lost.
+
+## Implementation Considerations
+
+Replacing the pre-configured LDAP docker container with an OpenLDAP instance was a pain point.  This is partly due to differences in the
+LDAP schemas of the two implementations.  The Bitnami implementation already had a group mechanism in place -- a single subdirectory called
+`ou=users` held both data about users (object type `posixAccount`) and groups of users (object type `groupOfNames`.)  Populating that with
+the necessary data involved adding groups that what we want and mapping users to groups.
+
+For historical reasons, I adopted a different schema for the OpenLDAP implementaiton.  Here users and groups are segregated into two
+different directories. The users are located in the subdirectory named `ou=People` and the groups are in another subdirectory at a
+peer level named `ou=Groups`.  To cut down on the required amount of user metadata, the user entries of type inetOrgPerson.  To more
+tightly control the user groups, the group entries are of type groupOfUniqueNames that use memberof and reiInt overlays to make sure
+that users in the groups actually exist.  The schema setup is also more complex, with an additional group (called `cn=Administrators`)
+of users that can modify the LDAP schema.
+
+These changes produce the result that Customizing an OpenLDAP service instance is a procedure that requires approximately thirteen steps:
+
+1. Installing the necessary LDAP software packages (unimplemented because it is handled by CloudFormation).
+
+2. Create a temporary encrypted password to access the LDAP instance during setup.
+
+3. Enable and start the systemd OpenLDAP service.
+
+4. Change the domain distinguished name of the LDAP installation.
+
+5. Install the additional LDAP schemas needed for the user and group object types.
+
+6. Install the memberof overlay.
+
+7. Install the refint overlay.
+
+8. Create our LDAP directory hierarchy, including the Reader, Writer, and Administrator groups.
+
+9. Allow the Administrator group to modify the directory.
+
+10. Add LDAP users to ou=Users.
+
+11. Map all the users into their correct initial groups.
+
+12. Set the administrator password to the encrypted version  provided by the setup process.
+
+13. Configure TLS (unimplemented for now.)
+
+The setup script implements each of these steps using a regular series of routine names (step1, step2, step3, etc...)
+This makes it easy for the script to accept a comma-separated list of digits to perform a subset of the steps for
+development and debugging purposes.
+
+A lesser pain point was generating all the npm modules used by the auth-server layer. This step is necessary because
+npm modules can include compiled code in other languages (like C or C++ for Cython interfaces) and that compiled code
+can have shared library dependencies in the environment where it needs to run.  This build is more transparently handled
+in the Docker implementation by using a multistage build.  The AWS build needs to do this inside an Amazon Linux comtainer.
+An Amazon Linux docker container is available, and the builder script can be modified to copy the node module archive to a
+location that is mapped to a directory outside the docker container.
+
+The final problem that the AWS implementation had to overcome is building the caddy binary under Amazon Linux. Strictly
+speaking, building caddy under Amazon Linux is not absolutely necessary.  It's a single, static binary that, once built, should
+be able to run under multiple similar kernel environments.  That should allow me to build it under one relatively modern
+Linux docker container and run under Amazon Linux 2023.  Building in a RHEL 8 docker container  might be necessary because
+Amazon offers a docker container that requires the security profile to be disabled (docker run `--security-opt seccomp=unconfined`)
+to access local networks -- which installing installing software like go requires.  The necessary (`--security-opt`) flag is not
+provided to the `docker build` command for good security reasons, meaning that I could not pre-build a Docker container
+with the go build environment needed to build caddy.  I would need to install the build environment every
+time caddy needed to be built, without leveraging some of the advantages of a Docker file.  Since the Docker implementation
+already used a builder script and I wanted to share that script between the Docker- and RPM-based builds. The solution to the
+problems of where and how to create the build environment required some thought.
+
+In the end, I chose a wrapper script approach.  A wrapper script creates the build environment in the (Amazon Linux 2023)
+docker container and then calls the caddy builder script used by the Docker implementation. The wrapper script command line
+parser is constructed in a way that it can pass command line arguments to the caddy builder script. Like the node modules builder
+script, the caddy builder script was modified to copy the built copy of caddy to a location mapped to directory outside the
+docker container.  Together these two scripts can build caddy inside an Amazon Linux 2023 docker container.
+
+The build of the actual cluster is handled by four CloudFormation templates:
+
+```
+./ldap-rpm/ldap-server.template     # configures the ldap tier EC2 instance
+
+./auth-rpm/auth-server.template     # configures the auth tier EC2 instance
+
+./caddy-rpm/caddy-server.template   # configures the caddy tier EC2 instance
+
+./auth-demo.template                # calls the other three templates to create the whole stack
+
+```
+
+`auth-demo.template` assumes that the other three can be accessed via HTTP from a S3 buckets.  Since it is assumed that the bucket may hold
+templates for dev, test, and release versions, the bucket is assumed to contain a directory path underneath the root where all three templates
+can be found in the same directory.
+
+All the binary, data, and config files installed by the new RPMs are placed under the `/opt/auth-demo` directory with the exception of
+the systemd service files.  Those are installed under `/usr/lib/systemd/system`.
+
+## Configuration
+
+The `setup-ldap.sh` script accepts the following environment variables as inputs:
+
+```
+LDAP_DOMAIN_DN (default: dc=example,dc=org)
+The LDAP domain distinguished name -- used to construct distguished name many directory objects
+LDAP_ORG (default: Example Organization)
+Used to fill a required field in the domain object at the root of the LDAP directory tree
+LDAP_LIB_PATH (default: /usr/lib64/openldap)
+Location where overlay libraries can be found
+LDAP_DB_NUM (default: 2)
+The LDAP database number -- should almost always be 2
+LDAP_DB_TYPE (default: mdb)
+OpenLDAP database type -- mdb should almost always be used
+LDAP_ADMIN_PASSWORD
+The {SSHA} encoded version of the LDAP root-level password
+LDAP_SETUP_FILE (default: /etc/openldap/setup_complete)
+The name of a file that is created (or modified) when the LDAP setup is successful and complete
+LDAP_USERS (default: user01,user02)
+Comma separated list of usernames to be initially inserted into the LDAP directory
+LDAP_PASSWORDS (default: bitnami1,bitnami2)
+Comma separated list of passwords that correspond to the values in the list in LDAP_USERS (default matches docker implementation)
+LDAP_READER_GROUP (default: dbReaders)
+The name given to the LDAP group of users that have database read privileges
+LDAP_WRITER_GROUP (default: dbWriters)
+The name given to the LDAP group of users that have database write/update privileges
+LDAP_ADMIN_GROUP (default: administrators)
+The name given to the LDAP group of users that can modify the LDAP itself
+LDAP_DB_READERS (default: all users from LDAP_USERS)
+The users added to the LDAP_READER_GROUP
+LDAP_DB_WRITERS (default: all users from LDAP_USERS)
+The users added to the LDAP_WRITER_GROUP
+LDAP_ADMINS (default: all users from LDAP_USERS)
+The users added to the LDAP_ADMIN_GROUP
+```
+
+The `ldap-server.template` accepts the following paramters:
+
+```
+KeyName
+Name of an existing EC2 KeyPair to enable SSH access to the instance
+LdapDBType (default: mdb)
+Value passed to LDAP_DB_TYPE
+LdapDomainDN (default: dc=example,dc=org)
+Value passed to LDAP_DOMAIN_DN
+LdapOrg (default: Example Organization)
+Value passed to LDAP_ORG
+LdapLibPath (default: /usr/lib64/openldap)
+Value passed to LDAP_LIB_PATH
+LdapDBNum (default: 2)
+Value passed to LDAP_DB_NUM
+LdapAdminPassword (default: <none>)
+Value passed to LDAP_ADMIN_PASSWORD
+LdapSetupFile (default: /etc/openldap/setup_complete)
+Value passed to LDAP_SETUP_FILE
+LdapUsers (default: user01,user02)
+Value passed to LDAP_USERS
+LdapReaderGroup (default: dbReaders)
+Value passed to LDAP_READER_GROUP
+LdapWriterGroup (default: dbWriters)
+Value passed to LDAP_WRITER_GROUP
+LdapAdminGroup (default: administrators)
+Value passed to LDAP_ADMIN_GROUP
+LdapDBReaders (default: all from LdapUsers)
+Value passed to LDAP_DB_READERS
+LdapDBWriters (default: all from LdapUsers)
+Value passed to LDAP_DB_WRITERS
+LdapAdmins (default: all from LdapUsers)
+Value passed to LDAP_DB_ADMINS
+InstanceType (default: t2.small)
+EC2 instance type for the ldap virtual machine
+SSHLocation (default: 0.0.0.0/0)
+CIDR determining remote access to public IP on ports 22 and 389
+S3RpmRepo (default: http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo)
+The http URL for the S3 bucket that is the rpm repo for the auth-demo-ldap-installer RPM.
+```
+
+The `auth-server.template` accepts the following parameters:
+
+```
+KeyName
+Name of an existing EC2 KeyPair to enable SSH access to the instance
+AuthConfigPath (default: /opt/auth-demo/etc/Ec2Config.json)
+Value passed to AUTH_CONFIG_PATH
+AuthPublicKey (default: /opt/auth-demo/share/auth-server/public-key.pem)
+Value passed to AUTH_PUBLIC_KEY
+AuthPrivateKey (default: /opt/auth-demo/share/auth-server/private-key.pem)
+Value passed to AUTH_PRIVATE_KEY
+AuthButtercupMasterPassword (default: srirachaBear)
+Value passed to AUTH_BCUP_MASTER_PASSWORD
+AuthButtercupGroupName (default: General)
+Value passed to AUTH_BCUP_GROUP_NAME
+AuthButtercupFile (default: /opt/auth-demo/share/auth-server/authPasswords.bcup)
+Value passed to AUTH_BCUP_FILE_NAME
+AuthButtercupReaderAttrName (default: db_reader)
+Value passed to AUTH_BCUP_DBREADER_NAME
+AuthButtercupWriterAttrName (default: db_writer)
+Value passed to AUTH_BCUP_DBWRITER_NAME
+LdapServerAddr
+The IP addr or DNS name of the LDAP server VM
+LdapServerSecurityGroupId
+The id of the security group created with the ldap server VM to allow access between the auth server and ldap server VMs
+LdapDomainDN (default: dc=example,dc=org)
+Value corresponding to LDAP_DOMAIN_DN -- needed navigate the LDAP
+LdapAdminPassword
+The admin password for the LDAP instance.
+LdapReaderGroupName (default: dbReaders)
+Value corresponding to LDAP_READER_GROUP
+LdapWriterGroupName (default: dbWriters)
+Value corresponding to LDAP_WRITER_GROUP
+InstanceType (default: t1.micro)
+EC2 instance type for the ldap virtual machine
+SSHLocation (default: 0.0.0.0/0)
+CIDR determining remote access to public IP on port 12123
+S3RpmRepo (default: http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo)
+The http URL for the S3 bucket that is the rpm repo for the auth-demo-auth-installer RPM.
+```
+
+The `caddy-server.template` accepts the following values:
+
+```
+KeyName
+Name of an existing EC2 KeyPair to enable SSH access to the instance
+JwtSharedKey (default: /opt/auth-demo/etc/public-key.pem)
+The path to the public key used to decrypt authentication JWTs -- must match data in file AUTH_PUBLIC_KEY
+AuthServerAddr
+The IP addr or DNS name of the auth server VM
+AuthServerPort (default: 12123)
+The TCP port number of the auth server
+AuthServerSecurityGroupId
+The id of the security group created with the auth server VM to allow access between the caddy server and auth server VMs
+InstanceType (default: t1.micro)
+EC2 instance type for the ldap virtual machine
+SSHLocation (default: 0.0.0.0/0)
+CIDR determining remote access to public IP on port 8080
+S3RpmRepo (default: http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo)
+The http URL for the S3 bucket that is the rpm repo for the auth-demo-caddy-installer RPM.
+```
+
+The `auth-demo.template` accepts the following values:
+
+```
+KeyName
+Name of an existing EC2 KeyPair to enable SSH access to all three instances (could be split into three for different keys for different tiers)
+TemplateS3Bucket (default: thaining-auth-demo)
+The name of the S3 bucket that holds caddy-server.template, auth-server.template, and ldap-server.template
+TemplateS3BucketPath (default: release1.0)
+The path from the root of the bucket to the directory where caddy-server.template, auth-server.template, and ldap-server.template
+TemplateS3BucketRegion (default: us-west-2)
+AWS region where the TemplateS3Bucket can be found
+LdapDomainDN (default: dc=example,dc=org)
+Value passed to ldap-server.template LdapDomainDN and auth-server.template LdapDomainDN
+EncryptedLdapAdminPassword
+Value passed to ldap-server.template LdapAdminPassword
+PlaintextLdapAdminPassword
+Value passed to auth-server.template LdapAdminPassword
+LdapOrg (default: An Example Organization)
+Value passed to ldap-server.template LdapOrg
+LdapUsers (default: user01,user02)
+Value passed to ldap-server.template LdapUsers
+LdapPasswords (default: user01pass, user02pass)
+Value passed to ldap-server.template LdapPasswords
+LdapReaderGroup (default: dbReaders)
+Value passed to ldap-server.template LdapReaderGroup and auth-server.template LdapReaderGroupName
+LdapWriterGroup (default: dbWriters)
+Value passed to ldap-server.template LdapWriterGroup and auth-server.template LdapWriterGroupName
+LdapAdminGroup (default: administrators)
+Value passed to ldap-server.template LdapAdminGroup
+LdapDBReaders (default: all from LdapUsers)
+Value passed to ldap-server.template LdapDBReaders
+LdapDBWriters (default: all from LdapUsers)
+Value passed to ldap-server.template LdapDBWriters
+LdapAdmins (default: all from LdapUsers)
+Value passed to ldap-server.template LdapAdmins
+AuthButtercupGroupName (default: General)
+Value passed to auth-server.template AuthButtercupGroupName
+AuthButtercupFile (default: /opt/auth-demo/share/auth-server/authPasswords.bcup)
+Value passed to auth-server.template AuthButtercupFile
+AuthButtercupReaderAttrName (default: db_reader)
+Value passed to auth-server.template AuthButtercupReaderAttrName
+AuthButtercupWriterAttrName (default: db_writer)
+Value passed to auth-server.template AuthButtercupWriterAttrName
+AuthServerPort (default: 12123)
+Value passed to caddy-server.template AuthServerPort
+```
+
+## Operation
+
+
+The general procedure for building the stack consists three major tasks: creating the necessary RPM files and making them available
+in a private RPM repo; making the CloudFormation templates for each of the stack tiers available via HTTP; and then running the
+CloudFormation template for the whole stack. These tasks can be completed using the following steps:
+
+1. Build each of the RPMs necessary for CloudFormation to build the whole stack on EC2.  To build the RPMs, go to the subdirectory
+for each service RPM and run the `build-rpm.sh` script there.  This should build all necessary dependencies, including the `caddy`
+binary, all the npm modules, and the encryption keys to sign and verify the authentication JWTs.  When modifying and rebuilding the
+RPM files, remember to update the `CADDY_RPM_BUILD`, `AUTH_RPM_BUILD`, and `LDAP_RPM_BUILD` variables in the relevant build scripts.
+
+   ```
+   cd caddy-rpm && ./build-rpm.sh
+   cd ../auth-rpm && ./build-rpm.sh
+   cd ../ldap-rpm && ./build-rpm.sh
+   cd ..
+   ```
+
+2. With the RPMs now built, they need to be signed with a GPG key.  One set of steps required to configure such a key for an
+Ubuntu 18 build system can be found in Phase 2 of the document `doc/how-to-set-up-a-s3-rpm-repo.txt`.  Once the key is set
+up, the `rpm` command can be used to sign the RPM files as a group.
+
+   ```
+   rpm --addsign *-rpm/auth-demo*.rpm
+   ```
+
+
+3. Once the RPMs are signed, they need to be need to put into a private RPM repo accessible via HTTP.  Tools and directories provided
+by the project support using an RPM repo in a S3 bucket.  A description of the steps required to create an RPM repo (with a slightly
+different procedure to populate it) can be found the document `doc/how-to-set-up-a-s3-rpm-repo.txt`.  The following steps assume
+that the bucket has been created, and is accessible using the `aws s3` CLI.  The name of the bucket can be supplied using the S3_BUCKET
+environment variable.
+
+   ```
+   mv *-rpm/auth-demo*.x86_64.rpm rpm-repo/x86_64 && mv *-rpm/auth_demo*.noarch.rpm rep-repo/noarch
+   S3_BUCKET_NAME=my-rpm-repo ./repo-tools/update_repo.sh
+   ```
+
+4. Next, the CloudFormation templates for each stack tier need to be made available via HTTP.  The CloudFormation template for the
+stack (`auth-demo.template`) assumes that the templates can be found in a S3 bucket. A description of the steps to create the
+required bucket to store the nested service templates can be found at `doc/how-to-set-up-a-s3-template-store.txt`.  The following
+command can be used to copy the necessary templates to the configured bucket `my-bucket-name` containing the folder `my-bucket-folder`:
+
+   ```
+   aws s3 cp *-rpm/*-server.template s3://my-bucket-name/my-bucket-folder
+   ```
+
+5. The requirements to run `auth-demo.template` are now met.  That can be loaded and run using the following steps:
+
+   1. On the "Cloudformation > Stacks > Create stack" page, click the "Upload a template file" button.
+   2. Click the "Choose file" button and a popup window appears.
+   3. Select auth-demo.template and click the Open button.  The popup window closes and S3 URL on
+   the Create Stack page is populated.
+   4. Click Next.
+   5. Enter the bucket name for the template bucket in the TemplateS3Bucket field.
+   6. Enter the folder name in the template bucket in the TemplateS3BucketPath field.
+   7. Set TemplateS3BucketRegion to the AWS region where the bucket is located.
+   8. Set S3RpmRepo to the URL for the `.repo` file created for the RPM repo.
+   9. Provide an encrypted LDAP admin password (encrypted in `{SSHA}` by `slappasswd` or similar) in EncryptedLdapAdminPassword.
+   10. Provide the corresponding plaintext version of the LDAP admin password in PlaintextLdapAdminPassword.
+   11. Provide a `AWS::EC2::KeyPair::KeyName` in KeyName
+   12. Provide a more restrictive network CIDR for SSH and LDAP access SSHLocation (optional bu HIGHLY recommended.)
+   13. Make any other desirable changes to the default parameters.
+   14. Click Next.
+   15. Configure any Stack options.
+   16. Click Next.
+   17. Acknowledge the capabilities that the stack requires.
+   18. Click Submit.
+
+Once the stack is built, the CaddyServerURL output can be used to access it:
+
+```
+> curl -kv -c cookiejar -H "Content-Type: application/json" -X POST --data '{"xiusername":"user01", "xipassword":"user01pass"}' http://ec2-35-166-67-19.us-west-2.compute.amazonaws.com:8080/auth
+Note: Unnecessary use of -X or --request, POST is already inferred.
+*   Trying 35.166.67.19...
+* TCP_NODELAY set
+* Connected to ec2-35-166-67-19.us-west-2.compute.amazonaws.com (35.166.67.19) port 8080 (#0)
+> POST /auth HTTP/1.1
+> Host: ec2-35-166-67-19.us-west-2.compute.amazonaws.com:8080
+> User-Agent: curl/7.58.0
+> Accept: */*
+> Content-Type: application/json
+> Content-Length: 50
+> 
+* upload completely sent off: 50 out of 50 bytes
+< HTTP/1.1 200 OK
+< Content-Length: 2
+< Content-Type: text/plain; charset=utf-8
+< Date: Thu, 04 May 2023 18:10:31 GMT
+< Etag: W/"2-nOO9QiTIwXgNtWtBJezz8kv3SLc"
+< Server: Caddy
+* cookie size: name/val 11 + 271 bytes
+* cookie size: name/val 4 + 1 bytes
+* cookie size: name/val 7 + 29 bytes
+* cookie size: name/val 8 + 0 bytes
+* Added cookie connect.sid="eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImM1SjZVWE5qVlRkNElKQzBCc1RneUEiLCJ1c2VyX2lkIjoidXNlcjAxIiwicm9sZXMiOlsiYXV0aHAvd3JpdGVyIiwiYXV0aHAvcmVhZGVyIl0sImlhdCI6MTY4MzIyMzgzMX0.FkiXceEbPddCq5baS0xsBq84s5nREAr4XqDz7HXV-JMNvwlQmWPwq2Q-E8wdKbq01LLLK4Y0F96R_g_aVHePxQ" for domain ec2-35-166-67-19.us-west-2.compute.amazonaws.com, path /, expire 1683225631
+< Set-Cookie: connect.sid=eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImM1SjZVWE5qVlRkNElKQzBCc1RneUEiLCJ1c2VyX2lkIjoidXNlcjAxIiwicm9sZXMiOlsiYXV0aHAvd3JpdGVyIiwiYXV0aHAvcmVhZGVyIl0sImlhdCI6MTY4MzIyMzgzMX0.FkiXceEbPddCq5baS0xsBq84s5nREAr4XqDz7HXV-JMNvwlQmWPwq2Q-E8wdKbq01LLLK4Y0F96R_g_aVHePxQ; Path=/; Expires=Thu, 04 May 2023 18:40:31 GMT; HttpOnly
+< X-Powered-By: Express
+< 
+* Connection #0 to host ec2-35-166-67-19.us-west-2.compute.amazonaws.com left intact
+> curl -kv -c cookiejar -H "Content-Type: application/json" -X POST --data '{"xiusername":"bcupUser01", "xipassword":"bcupUser01pass"}' http://ec2-35-166-67-19.us-west-2.compute.amazonaws.com:8080/auth
+Note: Unnecessary use of -X or --request, POST is already inferred.
+*   Trying 35.166.67.19...
+* TCP_NODELAY set
+* Connected to ec2-35-166-67-19.us-west-2.compute.amazonaws.com (35.166.67.19) port 8080 (#0)
+> POST /auth HTTP/1.1
+> Host: ec2-35-166-67-19.us-west-2.compute.amazonaws.com:8080
+> User-Agent: curl/7.58.0
+> Accept: */*
+> Content-Type: application/json
+> Content-Length: 58
+> 
+* upload completely sent off: 58 out of 58 bytes
+< HTTP/1.1 200 OK
+< Content-Length: 2
+< Content-Type: text/plain; charset=utf-8
+< Date: Thu, 04 May 2023 18:13:49 GMT
+< Etag: W/"2-nOO9QiTIwXgNtWtBJezz8kv3SLc"
+< Server: Caddy
+* cookie size: name/val 11 + 256 bytes
+* cookie size: name/val 4 + 1 bytes
+* cookie size: name/val 7 + 29 bytes
+* cookie size: name/val 8 + 0 bytes
+* Added cookie connect.sid="eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6InVQa1Q2a2xvc2FsN3BEejVsU1ZLRWciLCJ1c2VyX2lkIjoiYmN1cFVzZXIwMSIsInJvbGVzIjpbImF1dGhwL3JlYWRlciJdLCJpYXQiOjE2ODMyMjQwMjl9.rvLS_fUKw64K567X2qpMz856NHLtcsAps3IkLrmTrmX41FJdqIt_vFXmVsCwvbIE8845GgVWTTcgsmljXJI6ag" for domain ec2-35-166-67-19.us-west-2.compute.amazonaws.com, path /, expire 1683225829
+< Set-Cookie: connect.sid=eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6InVQa1Q2a2xvc2FsN3BEejVsU1ZLRWciLCJ1c2VyX2lkIjoiYmN1cFVzZXIwMSIsInJvbGVzIjpbImF1dGhwL3JlYWRlciJdLCJpYXQiOjE2ODMyMjQwMjl9.rvLS_fUKw64K567X2qpMz856NHLtcsAps3IkLrmTrmX41FJdqIt_vFXmVsCwvbIE8845GgVWTTcgsmljXJI6ag; Path=/; Expires=Thu, 04 May 2023 18:43:49 GMT; HttpOnly
+< X-Powered-By: Express
+< 
+* Connection #0 to host ec2-35-166-67-19.us-west-2.compute.amazonaws.com left intact
+```
+
+## Future Work
+
+Building on this work could go in several different directions:
+
+- Security here is minimal, so increasing the security of the deployment is a logical step.  The AWS deployment could make better
+use of networks like the Docker configuration to segregate traffic.  HTTPS and LDAPS could be used to encrypt traffic at all levels.
+- More clould friendly logging (e.g. AWS CloudWatch) would be useful.
+- Improvements to the buttercup module to improve performance (caching data in memory) and manipulate file contents.
+- Providing a uniform REST interface for managing users and passwords
+- Add a database tier behind the `/reader` and `/writer` access points with an expanded REST interface
+- Look at converting the Docker containers to something more like AWS Fargate or migrate the stack to Kubernetes

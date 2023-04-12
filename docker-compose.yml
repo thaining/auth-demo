@@ -23,6 +23,7 @@ services:
   ldap-server:
     build: ./ldap-server
     networks:
+      - default
       - backend
     environment:
       - LDAP_ADMIN_USERNAME=admin

@@ -1,0 +1,27 @@
+[Unit]
+Description=a caddy-based http service for an authentication REST interface
+Documentation=https://github.com/thaining/auth-demo
+After=network-online.target
+Wants=netowrk-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+CPUAccounting=true
+MemoryAccounting=true
+User=caddy-server
+Group=caddy-server
+
+EnvironmentFile=/opt/auth-demo/etc/caddy-server
+
+PassEnvironment=JWT_SHARED_KEY AUTH_SERVER_PROXY_HOST AUTH_SERVER_PROXY_PORT
+
+ExecStart=/opt/auth-demo/bin/caddy run --config /opt/auth-demo/etc/Caddyfile
+
+TimeoutStopSec=5s
+
+LimitNOFILE=32768
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target

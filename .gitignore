@@ -104,5 +104,14 @@ dist
 .tern-port
 
 # JWT keys
-public-key.pem
-private-key.pem
+common/public-key.pem
+common/private-key.pem
+auth-server/private-key.pem
+auth-server/public-key.pem
+caddy-server/public-key.pem
+
+# node modules
+auth-rpm/node_modules.tgz
+
+# caddy
+caddy-rpm/caddy

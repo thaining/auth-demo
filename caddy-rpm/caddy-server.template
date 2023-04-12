@@ -1,0 +1,225 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "AWS CloudFormation template to create a LDAP server EC2 instance for the auth-demo",
+
+  "Parameters": {
+
+    "KeyName": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+
+    "JwtSharedKey": {
+      "Description": "The path to the public key used to decrypt authentication JWTs",
+      "Type": "String",
+      "Default": "/opt/auth-demo/etc/public-key.pem",
+      "AllowedPattern": "^\\/.+(?:\\/.+)+\\/*$",
+      "ConstraintDescription": "must be a valid Linux path"
+    },
+
+    "AuthServerAddr": {
+      "Description": "IPv4 address or DNS name of the authentication REST server",
+      "Type": "String",
+      "AllowedPattern": "^(\\d{1,3})(?:\\.(\\d{1,3})){3}$|^[\\w_-]+(?:\\.[\\w_-]+){0,3}$",
+      "ConstraintDescription": "must be a valid DNS name or IP address"
+    },
+
+    "AuthServerPort": {
+      "Description": "The number of the TCP port used to communicate with the authentication REST server",
+      "Type": "Number",
+      "Default": 12123,
+      "ConstraintDescription": "must be an integer"
+    },
+
+    "AuthServerSecurityGroupId": {
+      "Description" : "Security group id for the auth server stack to allow ingress",
+      "Type": "AWS::EC2::SecurityGroup::Id",
+      "ConstraintDescription" : "must be the name of an existing EC2 Security Group."
+    },
+
+    "InstanceType" : {
+      "Description" : "Caddy Server EC2 instance type",
+      "Type" : "String",
+      "Default" : "t1.micro",
+      "AllowedValues" : [ "t1.micro", "t2.nano", "t2.micro", "t2.small", "t2.medium" ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+
+    "SSHLocation" : {
+      "Description" : " The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "S3RpmRepo": {
+      "Description" : "URL of the S3 RPM repo that holds stack RPMs",
+      "Type": "String",
+      "Default": "http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo",
+      "ConstraintDescription" : "must a http URL for a RPM repo"
+    }
+
+  },
+
+  "Mappings" : {
+
+    "AWSRegion2AMI" : {
+      "af-south-1"       : { "HVM64": "ami-00b093e6c171c6ce6" },
+      "ap-east-1"        : { "HVM64": "ami-01f5314848db0e79c" },
+      "ap-northeast-1"   : { "HVM64": "ami-02a2700d37baeef8b" },
+      "ap-northeast-2"   : { "HVM64": "ami-03221589fd7c8f183" },
+      "ap-northeast-3"   : { "HVM64": "ami-0265608a60d05ecf8" },
+      "ap-south-1"       : { "HVM64": "ami-0376ec8eacdf70aae" },
+      "ap-south-2"       : { "HVM64": "ami-085077d1720a9f56a" },
+      "ap-southeast-1"   : { "HVM64": "ami-0bf97847fcd5c9f57" },
+      "ap-southeast-2"   : { "HVM64": "ami-0d0175e9dbb94e0d2" },
+      "ap-southeast-3"   : { "HVM64": "ami-083bad99348a76cb7" },
+      "ap-southeast-4"   : { "HVM64": "ami-0622154856d99026b" },
+      "ca-central-1"     : { "HVM64": "ami-0333ede0183ed48e3" },
+      "eu-central-1"     : { "HVM64": "ami-00ad2436e75246bba" },
+      "eu-central-2"     : { "HVM64": "ami-01e03e5e0998a737c" },
+      "eu-north-1"       : { "HVM64": "ami-0cf72be2f86b04e9b" },
+      "eu-south-1"       : { "HVM64": "ami-0c96319db4545e18f" },
+      "eu-south-2"       : { "HVM64": "ami-058eb0ceb0f53402c" },
+      "eu-west-1"        : { "HVM64": "ami-00169914e6299b8e0" },
+      "eu-west-2"        : { "HVM64": "ami-0ad97c80f2dfe623b" },
+      "eu-west-3"        : { "HVM64": "ami-017d9f576d1635a77" },
+      "me-central-1"     : { "HVM64": "ami-01434f0c7dc60279f" },
+      "me-south-1"       : { "HVM64": "ami-0fdfabaabf8f0225f" },
+      "sa-east-1"        : { "HVM64": "ami-05240a8eacac22db2" },
+      "us-east-1"        : { "HVM64": "ami-00c39f71452c08778" },
+      "us-east-2"        : { "HVM64": "ami-07bc04fdc13241142" },
+      "us-west-1"        : { "HVM64": "ami-07bc04fdc13241142" },
+      "us-west-2"        : { "HVM64": "ami-0efa651876de2a5ce" }
+    }
+
+  },
+
+  "Resources": {
+
+    "CaddyServerInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Metadata": {
+        "AWS::CloudFormation::Init" : {
+          "configSets": {
+            "ConfigAndInstall":[
+              "Config", "Install"
+            ]
+          },
+          "Config": {
+            "users": {
+              "caddy-server": {
+                 "homeDir": "/home/caddy-server"
+              }
+            }
+          },
+          "Install": {
+            "packages": {
+              "yum": {
+                "auth-demo-caddy-installer": [
+                ]
+              }
+            },
+            "files": {
+              "/opt/auth-demo/etc/caddy-server": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "JWT_SHARED_KEY=", { "Ref": "JwtSharedKey" }, "\n",
+                      "AUTH_SERVER_PROXY_HOST=", { "Ref": "AuthServerAddr" }, "\n",
+                      "AUTH_SERVER_PROXY_PORT=", { "Ref": "AuthServerPort" }, "\n"
+                    ]
+                  ]
+                },
+                "mode": "000440",
+                "owner": "root",
+                "group" : "caddy-server"
+              }
+            },
+            "services": {
+              "systemd": {
+                "caddy-server": { "enabled": "true", "ensureRunning": "true" }
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": { "Fn::FindInMap": [ "AWSRegion2AMI", { "Ref" : "AWS::Region" }, "HVM64" ] },
+        "InstanceType": { "Ref": "InstanceType" },
+        "SecurityGroups": [ "Ref": "CaddyServerSecurityGroup" ],
+        "KeyName": { "Ref": "KeyName" },
+        "Tags": [
+             {"Key": "Name", "Value": { "Fn::Join": [ "", [
+                  {"Ref": "AWS::StackName"}, "-caddy"
+             ]]}}
+        ],
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+             "#!/bin/bash -xe\n",
+             "yum update -y aws-cfn-bootstrap\n",
+             "curl ", {"Ref": "S3RpmRepo"}, " > /etc/yum.repos.d/my-rpm-repo.repo && yum makecache\n",
+
+             "# Install the files and packages from the metadata\n",
+             "/opt/aws/bin/cfn-init -v ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource CaddyServerInstance ",
+             "         --configsets ConfigAndInstall ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+
+             "# Signal the status from cfn-init\n",
+             "/opt/aws/bin/cfn-signal -e $? ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource CaddyServerInstance ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n"
+        ]]}}
+      },
+
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT5M"
+        }
+      }
+
+    },
+
+    "CaddyServerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Enable HTTP access via port 80",
+        "SecurityGroupIngress" : [
+          {"IpProtocol" : "tcp", "FromPort" : "8080", "ToPort" : "8080", "CidrIp" : { "Ref" : "SSHLocation"}},
+          {"IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation"}}
+        ]
+      }
+    },
+
+    "AuthInboundRule": {
+       "Type": "AWS::EC2::SecurityGroupIngress",
+       "Properties":{
+          "IpProtocol": "tcp",
+          "FromPort": { "Ref" : "AuthServerPort" },
+          "ToPort": { "Ref" : "AuthServerPort" },
+          "SourceSecurityGroupId": {
+             "Fn::GetAtt": [ "CaddyServerSecurityGroup", "GroupId" ]
+          },
+          "GroupId": { "Ref": "AuthServerSecurityGroupId" }
+       }
+    }
+
+  },
+
+  "Outputs" : {
+    "CaddyServerURL" : {
+      "Description" : "URL for newly created LDAP server",
+      "Value" : { "Fn::Join" : ["", [
+                                  "http://", { "Fn::GetAtt" : [ "CaddyServerInstance", "PublicDnsName" ] }, ":8080"
+                                ]]}
+    }
+  }
+}

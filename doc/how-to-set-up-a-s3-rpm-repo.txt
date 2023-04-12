@@ -1,0 +1,229 @@
+Creation and population of a RPM repo in a S3 bucket occurs in four overall phases.  The first phase
+creates the bucket, sets its security property, and configures it for http access by yum/dnf.  The next
+phase creates the GPG key that identifies the repo and the key used to sign the RPM files in it.  The
+third phase creates files that can identify the repo to yum/dnf and places them into the repo bucket
+(for easy retrieval via http.)  The last phase is an overview of the steps in this software project to
+load RPM files into the repo.
+
+Phase 1. Prepare the S3 bucket.
+
+These steps are performed from the AWS S3 console.
+
+a) Create the S3 bucket and give it a name.
+
+   i. Click "Create bucket" on the "Amazon S3 > Buckets" page.  The "Create bucket" screen appears.
+   ii. Enter a bucket name ("my-rpm-repo")
+   iii. Choose an appropriate regiion ("us-west-2")
+   iv. Choose "ACLs disabled" under Object Ownership
+   v. Deselect "Block all public access" to allow limited public access (a rule to limit it to AWS
+   access only will be created shortly.) Check the acknowledgement box.
+   vi. Disable "Bucket Versioning"
+   vii. Add an appropriate tag
+   viii. Set "Encryption key type" to an appropriate value
+   ix. Click "Create bucket".  The "Create bucket" screen closes.
+
+b) Set the access policy for the bucket
+
+   i. On the "Amazon S3 > Buckets" page, click on the name of the bucket created in Step a).
+   ii. Click on the Properties tab.  Copy the "Amazon Resource Name (ARN)" and save it somewhere.
+   iii. Click on the Permissions tab.
+   iv. Click Edit in the "Bucket policy" section.  The "Edit bucket policy" screen appears.
+   v. To create a policy, click the "Policy generator".  The "AWS Policy Generator" screen appears
+   in another tab.
+   vi. Set "Select Type of Policy" to "S3 Bucket Policy"
+   vii. Set Effect to Allow
+   viii. Set Principal to "*"
+   ix. Set Action to GetObject
+   x. Set the "Amazon Resource Name (ARN)" field to the value from Step b) ii with the string "/*"
+   appended to it. (arn:aws:s3:::my-rpm-repo/*)
+   xi. Click "Add Statement"
+   xii. Click "Generate Policy".  The "Policy JSON Document" popup appears.  The produced policy should
+   look something like this:
+
+{
+  "Id": "Policy1680128755888",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Stmt1680128753984",
+      "Action": [
+        "s3:GetObject"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:s3:::my-rpm-repo/^",
+      "Principal": "*"
+    }
+  ]
+}
+
+(The "Id", "Sid", and "Resource" fields will be different for each repo bucket created.)
+
+   xiii. Close the "AWS Policy Generator" tab.
+   xiv. Copy the JSON for the Policy into the "Policy" in the tab showing the "Edit bucket policy" page.
+   xv. Click "Save changes"
+
+c) Enable Static website hosting for the bucket
+   i. On the "Amazon S3 > Buckets" page, click on the name of the bucket created in Step a).
+   ii. Click on the Properties tab. Find "Static website hosting" at the bottom of the screen. Click "Edit". The "Edit static website hosting" screen appears.
+   iii. Under "Statc website hosting", click the Enable radio button.
+   iv. Set the "Index document" field to "index.html"
+   v.  Click the "Save changes" button.
+
+Phase 2. Create a GPG key and configure it for use.
+
+This step is performed using a command line shell of a Linux system.  This phase documents the process
+for an Ubuntu 18 development system with the gpg and rpm packages installed.  Steps on a Redhat/Fedora/
+Centos system will be similar -- and generally have those packages installed by default.
+
+a) Generate a gpg key pair.
+
+gpg --gen-key
+gpg: WARNING: unsafe permissions on homedir '<home directory absolute path>/.gnupg'
+gpg (GnuPG) 2.2.4; Copyright (C) 2017 Free Software Foundation, Inc.
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+
+Note: Use "gpg --full-generate-key" for a full featured key generation dialog.
+
+GnuPG needs to construct a user ID to identify your key.
+
+Real name: Ted Haining
+Email address: tedhaining@yahoo.com
+You selected this USER-ID:
+    "Ted Haining <tedhaining@yahoo.com>"
+
+Change (N)ame, (E)mail, or (O)kay/(Q)uit? O
+We need to generate a lot of random bytes. It is a good idea to perform
+some other action (type on the keyboard, move the mouse, utilize the
+disks) during the prime generation; this gives the random number
+generator a better chance to gain enough entropy.
+We need to generate a lot of random bytes. It is a good idea to perform
+some other action (type on the keyboard, move the mouse, utilize the
+disks) during the prime generation; this gives the random number
+generator a better chance to gain enough entropy.
+gpg: key 54D78F0182F98A02 marked as ultimately trusted                  <===== key id here
+gpg: directory '<home directory absolute path>/.gnupg/openpgp-revocs.d' created
+gpg: revocation certificate stored as '<home directory absolute path>/.gnupg/openpgp-revocs.d/83D9148756F4FD1F5C76975D44D78F0182F98A02.rev'
+public and secret key created and signed.
+
+pub   rsa3072 2023-03-30 [SC] [expires: 2025-03-29]
+      83D9148756F4FD1F5C76975D44D78F0182F98A02
+uid                      Ted Haining <tedhaining@yahoo.com>
+sub   rsa3072 2023-03-30 [E] [expires: 2025-03-29]
+
+
+b) Set this key as the default key and key password in ~/.gnupg/gpg.conf using values from
+the previous step.
+
+vi ~/.gnupg/gpg.conf
+default-key 54D78F0182F98A02
+passphrase-file <home directory absolute path>/.gnupg/password
+
+
+c) Put the key password in the password file
+cat > ~/.gnupg/password
+<this is not the real password>
+^D
+
+d) Make sure the default password file is secure
+
+chmod 600 ~/.gnupg/password
+
+Phase 3. Setup RPM software and create the files that identify the repo
+
+a) Make sure some packages are installed on Ubuntu 18
+
+sudo apt-get install rpm createrepo
+
+On Redhat 8/9, the yum-utils and createrepo package appear to be required.
+For problems, see here: https://access.redhat.com/solutions/3755901
+
+sudo yum install yum-utils createrepo
+
+b) Configure the rpmmacros correctly
+
+vi ~/.rpmmacros
+%_signature gpg
+%_gpg_name Ted Haining <tedhaining@yahoo.com>
+
+c) check a copy of the https://github.com/thaining/auth-demo project, here placing it
+directly in the user home directory
+
+cd ~
+git clone https://github.com/thaining/auth-demo
+
+d) Add the public key created in the previous Phase to the local copy of the RPM repo
+under the auth-demo project
+
+cp RPM-GPG-KEY-my-rpm-repo ~/src/auth-demo/rpm-repo
+
+e) Create the yum definition for S3 bucket to the local copy of the repo
+
+cat > ~/auth-demo/my-rpm-repo.repo
+[my-rpm-repo-noarch]
+name=Ted Haining's Repo
+baseurl=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/noarch/
+enabled=1
+gpgkey=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/RPM-GPG-KEY-my-rpm-repo
+gpgcheck=1
+
+[my-rpm-repo-i386]
+name=Ted Haining’s Repo
+baseurl=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/i386/
+enabled=1
+gpgkey=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/RPM-GPG-KEY-my-rpm-repo
+gpgcheck=1
+
+[my-rpm-repo-x86_64]
+name=Ted Haining’s Repo
+baseurl=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/x86_64/
+enabled=1
+gpgkey=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/RPM-GPG-KEY-my-rpm-repo
+gpgcheck=1
+
+[my-rpm-repo-SRPMS]
+name=Ted Haining’s Repo
+baseurl=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/SRPMS/
+enabled=1
+gpgkey=http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/RPM-GPG-KEY-my-rpm-repo
+^D
+
+f) Use the provided tool to format the RPM repo and sync the local copy to the S3 bucket.
+Note: this tool assumes that the 'aws' command line tool is correctly installed and can access
+the S3 bucket)
+
+S3_BUCKET=<name of S3 bucket, default: my-rpm-repo from Phase 1> ~/auth-demo/repo-tools/update_repo.sh
+
+Phase 4. Create the necessary RPM files and sync them to the S3 bucket
+
+a) Complete the following steps for each of the three subdirectories (ldap-rpm, auth-rpm, caddy-rpm --
+in that order) in the auth-demo project
+(here using the git clone from the previous Phase)
+
+i. Set the build number and build the RPM
+Note: build number changes are necessary only when changes are made to project code
+
+cd ~/src/auth-demo/<subdirectory>
+vim build-rpm.sh
+
+ii. Build the RPM
+
+./build-rpm.sh
+
+iii. Sign the RPM according to which one was built and move it to the correct part of the repo
+
+/ldap-rpm
+rpm --addsign auth-demo-ldap-installer-<build version>-<build number>.noarch.rpm
+mv auth-demo-ldap-installer-<build version>-<build number>.noarch.rpm ../rpm-repo/noarch
+
+/auth-rpm
+rpm --addsign auth-demo-auth-installer-<build version>-<build number>.x86_64.rpm
+mv auth-demo-auth-installer-<build version>-<build number>.x86_64.rpm ../rpm-repo/x86_64
+
+/caddy-rpm
+rpm --addsign auth-demo-caddy-installer-<build version>-<build number>.x86_64.rpm
+mv auth-demo-caddy-installer-<build version>-<build number>.x86_64.rpm ../rpm-repo/x86_64
+
+b) Sync the built RPMs from the local copy of the RPM repo to the S3 bucket
+cd ~/auth-demo
+./repo-tools/update_repo.sh

@@ -1,0 +1,324 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "AWS CloudFormation template to create a LDAP server EC2 instance for the auth-demo",
+
+  "Parameters": {
+
+    "KeyName": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+
+    "LdapDBType": {
+      "Description": "OpenLDAP database type -- mdb should almost always be used",
+      "Type": "String",
+      "Default": "mdb",
+      "AllowedValues": [ "mdb", "bdb", "hdb" ],
+      "ConstraintDescription": "must be a valid OpenLDAP DB type"
+    },
+
+    "LdapDomainDN": {
+      "Description": "The LDAP domain distinguished name",
+      "Type": "String",
+      "Default": "dc=example,dc=org",
+      "AllowedPattern": "^dc=\\S+(?:,dc=\\S+)*$",
+      "ConstraintDescription": "must be a valid distinguished name consisting of command separated domain components"
+    },
+
+    "LdapOrg": {
+      "Description": "A string naming or describing the organization owning the LDAP database",
+      "Type": "String",
+      "Default": "An Example Organization",
+      "AllowedPattern": ".+",
+      "ConstraintDescription": "must be alphanumeric characters"
+    },
+
+    "LdapLibPath": {
+      "Description": "The path where OpenLDAP shared libraries can be found (distribuiton dependent)",
+      "Type": "String",
+      "Default": "/usr/lib64/openldap",
+      "AllowedPattern": "^\\/.+(?:\\/.+)+\\/*$",
+      "ConstraintDescription": "must be a valid Linux path"
+    },
+
+    "LdapDBNum": {
+      "Description": "The LDAP database number -- should almost always be 2",
+      "Type": "Number",
+      "Default": 2,
+      "ConstraintDescription": "must be an integer"
+    },
+
+    "LdapAdminPassword": {
+      "Description": "a slapasswd encryted password using SSHA",
+      "Type": "String",
+      "AllowedPattern": "^\\{SSHA\\}[\\w\\+\\/\\=]+$",
+      "ConstraintDescription": "must be a base64 encoded string prefaced by {SSHA}"
+    },
+
+    "LdapSetupFile": {
+      "Description": "path of the file used to indicate that LDAP setup is complete",
+      "Type": "String",
+      "Default": "/etc/openldap/setup_complete",
+      "AllowedPattern": "^\\/.+(?:\\/.+)*$",
+      "ConstraintDescription": "must be a valid absolute file path"
+    },
+
+    "LdapUsers": {
+      "Description": "comma separated list of usernames to be inserted into the LDAP directory",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapPasswords": {
+      "Description": "comma separated list of passwords, corresponding in number to the user list",
+      "Type": "String",
+      "Default": "user01pass, user02pass",
+      "AllowedPattern": "^[^,\"]+(?:,[^,\"]+)*",
+      "ConstraintDescription": "passwords can be most characters except , and \""
+    },
+
+    "LdapReaderGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that can use the DB Reader REST interface",
+      "Type": "String",
+      "Default": "dbReaders",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapWriterGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that can use the DB Writer REST interface",
+      "Type": "String",
+      "Default": "dbWriters",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapAdminGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that is an LDAP administrator",
+      "Type": "String",
+      "Default": "administrators",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapDBReaders": {
+      "Description": "comma separated list of usernames to be inserted into the DB Reader LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapDBWriters": {
+      "Description": "comma separated list of usernames to be inserted into the DB Writer LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapAdmins": {
+      "Description": "comma separated list of usernames to be inserted into the administrator LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "InstanceType" : {
+      "Description" : "WebServer EC2 instance type",
+      "Type" : "String",
+      "Default" : "t2.small",
+      "AllowedValues" : [ "t1.micro", "t2.nano", "t2.micro", "t2.small", "t2.medium" ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+
+    "SSHLocation" : {
+      "Description" : " The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "S3RpmRepo": {
+      "Description" : "URL of the S3 RPM repo that holds stack RPMs",
+      "Type": "String",
+      "Default": "http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo",
+      "ConstraintDescription" : "must a http URL for a RPM repo"
+    }
+
+  },
+
+  "Mappings" : {
+
+    "AWSRegion2AMI" : {
+      "af-south-1"       : { "HVM64": "ami-00b093e6c171c6ce6" },
+      "ap-east-1"        : { "HVM64": "ami-01f5314848db0e79c" },
+      "ap-northeast-1"   : { "HVM64": "ami-02a2700d37baeef8b" },
+      "ap-northeast-2"   : { "HVM64": "ami-03221589fd7c8f183" },
+      "ap-northeast-3"   : { "HVM64": "ami-0265608a60d05ecf8" },
+      "ap-south-1"       : { "HVM64": "ami-0376ec8eacdf70aae" },
+      "ap-south-2"       : { "HVM64": "ami-085077d1720a9f56a" },
+      "ap-southeast-1"   : { "HVM64": "ami-0bf97847fcd5c9f57" },
+      "ap-southeast-2"   : { "HVM64": "ami-0d0175e9dbb94e0d2" },
+      "ap-southeast-3"   : { "HVM64": "ami-083bad99348a76cb7" },
+      "ap-southeast-4"   : { "HVM64": "ami-0622154856d99026b" },
+      "ca-central-1"     : { "HVM64": "ami-0333ede0183ed48e3" },
+      "eu-central-1"     : { "HVM64": "ami-00ad2436e75246bba" },
+      "eu-central-2"     : { "HVM64": "ami-01e03e5e0998a737c" },
+      "eu-north-1"       : { "HVM64": "ami-0cf72be2f86b04e9b" },
+      "eu-south-1"       : { "HVM64": "ami-0c96319db4545e18f" },
+      "eu-south-2"       : { "HVM64": "ami-058eb0ceb0f53402c" },
+      "eu-west-1"        : { "HVM64": "ami-00169914e6299b8e0" },
+      "eu-west-2"        : { "HVM64": "ami-0ad97c80f2dfe623b" },
+      "eu-west-3"        : { "HVM64": "ami-017d9f576d1635a77" },
+      "me-central-1"     : { "HVM64": "ami-01434f0c7dc60279f" },
+      "me-south-1"       : { "HVM64": "ami-0fdfabaabf8f0225f" },
+      "sa-east-1"        : { "HVM64": "ami-05240a8eacac22db2" },
+      "us-east-1"        : { "HVM64": "ami-00c39f71452c08778" },
+      "us-east-2"        : { "HVM64": "ami-07bc04fdc13241142" },
+      "us-west-1"        : { "HVM64": "ami-07bc04fdc13241142" },
+      "us-west-2"        : { "HVM64": "ami-0efa651876de2a5ce" }
+    }
+
+  },
+
+  "Resources": {
+
+    "LdapServerInstance": {
+      "Type": "AWS::EC2::Instance",
+      "Metadata": {
+        "AWS::CloudFormation::Init" : {
+          "configSets": {
+            "InstallAndRun":[
+              "Install"
+            ]
+          },
+          "Install": {
+            "packages": {
+              "yum": {
+                "auth-demo-ldap-installer": [
+                ]
+              }
+            },
+            "files": {
+              "/opt/auth-demo/etc/libopenldap.sh": {
+                "content": {
+                  "Fn::Join": [
+                    "",
+                    [
+                      "#!/bin/bash\n\n",
+                      "setupEnvironment() {\n",
+                      "   cat << EOF\n",
+                      "export LDAP_DOMAIN_DN=\"", { "Ref": "LdapDomainDN" }, "\"\n",
+                      "export LDAP_ORG=\"", { "Ref": "LdapOrg" }, "\"\n",
+                      "export LDAP_LIB_PATH=\"", { "Ref": "LdapLibPath" }, "\"\n",
+                      "export LDAP_DB_NUM=\"", { "Ref": "LdapDBNum" }, "\"\n",
+                      "export LDAP_DB_TYPE=\"", { "Ref": "LdapDBType" }, "\"\n",
+                      "export LDAP_ADMIN_PASSWORD=\"", { "Ref": "LdapAdminPassword" }, "\"\n",
+                      "export LDAP_SETUP_FILE=\"", { "Ref": "LdapSetupFile" }, "\"\n",
+                      "export LDAP_USERS=\"", { "Ref": "LdapUsers" }, "\"\n",
+                      "export LDAP_PASSWORDS=\"", { "Ref": "LdapPasswords" }, "\"\n",
+                      "export LDAP_READER_GROUP=\"", { "Ref": "LdapReaderGroup" }, "\"\n",
+                      "export LDAP_WRITER_GROUP=\"", { "Ref": "LdapWriterGroup" }, "\"\n",
+                      "export LDAP_ADMIN_GROUP=\"", { "Ref": "LdapAdminGroup" }, "\"\n",
+                      "export LDAP_DB_READERS=\"", { "Ref": "LdapDBReaders" }, "\"\n",
+                      "export LDAP_DB_WRITERS=\"", { "Ref": "LdapDBWriters" }, "\"\n",
+                      "export LDAP_ADMINS=\"", { "Ref": "LdapAdmins" }, "\"\n",
+                      "EOF\n",
+                      "}\n\n"
+                    ]
+                  ]
+                },
+                "mode": "000400",
+                "owner": "root",
+                "group" : "root"
+              }
+            },
+            "commands": {
+              "01_openldap_config": {
+                "command": "/opt/auth-demo/bin/setup-ldap.sh -l -c /opt/auth-demo/etc/libopenldap.sh"
+              }
+            },
+            "services": {
+              "systemd": {
+                "slapd": { "enabled": true, "ensureRunning": "true" }
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "ImageId": { "Fn::FindInMap": [ "AWSRegion2AMI", { "Ref" : "AWS::Region" }, "HVM64" ] },
+        "InstanceType": { "Ref": "InstanceType" },
+        "SecurityGroups": [ "Ref": "LdapServerSecurityGroup" ],
+        "KeyName": { "Ref": "KeyName" },
+        "Tags": [
+             {"Key": "Name", "Value": { "Fn::Join": [ "", [
+                  {"Ref": "AWS::StackName"}, "-ldap"
+             ]]}}
+        ],
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+             "#!/bin/bash -xe\n",
+             "yum update -y aws-cfn-bootstrap\n",
+             "curl ", {"Ref": "S3RpmRepo"}, " > /etc/yum.repos.d/my-rpm-repo.repo && yum makecache\n",
+
+             "# Install the files and packages from the metadata\n",
+             "/opt/aws/bin/cfn-init -v ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource LdapServerInstance ",
+             "         --configsets InstallAndRun ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+
+             "# Signal the status from cfn-init\n",
+             "/opt/aws/bin/cfn-signal -e $? ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource LdapServerInstance ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n"
+        ]]}}
+      },
+
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT5M"
+        }
+      }
+
+    },
+
+    "LdapServerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Enable HTTP access via port 80",
+        "SecurityGroupIngress" : [
+          {"IpProtocol" : "tcp", "FromPort" : "389", "ToPort" : "389", "CidrIp" : { "Ref" : "SSHLocation"}},
+          {"IpProtocol" : "tcp", "FromPort" : "22", "ToPort" : "22", "CidrIp" : { "Ref" : "SSHLocation"}}
+        ]
+      }
+    }
+  },
+
+  "Outputs" : {
+    "LdapServerURL" : {
+      "Description" : "URL for newly created LDAP server",
+      "Value" : { "Fn::Join" : ["", [
+                                  "ldap://", { "Fn::GetAtt" : [ "LdapServerInstance", "PublicDnsName" ] }, ":389"
+                                ]]}
+    },
+    "LdapPrivateDnsName": {
+      "Description" : "Internal DNS name of the LDAP server",
+      "Value": { "Fn::GetAtt": [ "LdapServerInstance", "PrivateDnsName" ] }
+    },
+    "LdapSecurityGroup": {
+      "Description" : "The SecurityGroupId of the LDAP server security group",
+      "Value": { "Fn::GetAtt": [ "LdapServerSecurityGroup", "GroupId" ] }
+    }
+  }
+}

@@ -38,7 +38,7 @@
     }
 }
 
-*:8080 {
+:8080 {
     route /auth {
         reverse_proxy {env.AUTH_SERVER_PROXY_HOST}:{env.AUTH_SERVER_PROXY_PORT}
     }

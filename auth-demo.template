@@ -1,0 +1,274 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+
+  "Description": "AWS CloudFormation template to create all the tiers for the auth-demo",
+
+  "Parameters": {
+
+    "KeyName": {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the instance",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+
+    "TemplateS3Bucket": {
+       "Description": "S3 bucket name where tier templates can be found",
+       "Type": "String",
+       "Default": "thaining-auth-demo",
+       "AllowedPattern": "^[^\\/^\\s]+$",
+       "ConstraintDescription": "Should be bucket name without folders or other protocol info"
+    },
+
+    "TemplateS3BucketPath": {
+       "Description": "Folder path to where tier templates can be found",
+       "Type": "String",
+       "Default": "release1.0",
+       "AllowedPattern": "^\\S+$",
+       "ConstraintDescription": "Should be the path within the bucket to the folder without leading /"
+    },
+
+    "TemplateS3BucketRegion": {
+       "Description": "AWS region where the TemplateS3Bucket can be found",
+       "Type": "String",
+       "Default": "us-west-2",
+       "AllowedValues": [ "af-south-1", "ap-east-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-south-1", "ap-south-2", "ap-southeast-1", "ap-southeast-2", "ap-southeast-3", "ap-southeast-4", "ca-central-1", "eu-central-1", "eu-central-2", "eu-north-1", "eu-south-1", "eu-south-2", "eu-west-1", "eu-west-2", "eu-west-3", "me-central-1", "me-south-1", "sa-east-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2" ]
+    },
+
+    "LdapDomainDN": {
+      "Description": "The LDAP domain distinguished name",
+      "Type": "String",
+      "Default": "dc=example,dc=org",
+      "AllowedPattern": "^dc=\\S+(?:,dc=\\S+)*$",
+      "ConstraintDescription": "must be a valid distinguished name consisting of command separated domain components"
+    },
+
+    "EncryptedLdapAdminPassword": {
+      "Description": "a slapasswd encryted password using SSHA",
+      "Type": "String",
+      "AllowedPattern": "^\\{SSHA\\}[\\w\\+\\/\\=]+$",
+      "ConstraintDescription": "must be a base64 encoded string prefaced by {SSHA}"
+    },
+
+    "PlaintextLdapAdminPassword": {
+      "Description": "The administratoar password for the backing LDAP directory",
+      "Type": "String",
+      "AllowedPattern": "^\\S+$",
+      "ConstraintDescription": "must be non-whitespace characters"
+    },
+
+    "LdapOrg": {
+      "Description": "A string naming or describing the organization owning the LDAP database",
+      "Type": "String",
+      "Default": "An Example Organization",
+      "AllowedPattern": ".+",
+      "ConstraintDescription": "must be alphanumeric characters"
+    },
+
+    "LdapUsers": {
+      "Description": "comma separated list of usernames to be inserted into the LDAP directory",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapPasswords": {
+      "Description": "comma separated list of passwords, corresponding in number to the user list",
+      "Type": "String",
+      "Default": "user01pass, user02pass",
+      "AllowedPattern": "^[^,\"]+(?:,[^,\"]+)*",
+      "ConstraintDescription": "passwords can be most characters except , and \""
+    },
+
+    "LdapReaderGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that can use the DB Reader REST interface",
+      "Type": "String",
+      "Default": "dbReaders",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapWriterGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that can use the DB Writer REST interface",
+      "Type": "String",
+      "Default": "dbWriters",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapAdminGroup": {
+      "Description": "name of the OpenLDAP groupOfUniqueNames that is an LDAP administrator",
+      "Type": "String",
+      "Default": "administrators",
+      "AllowedPattern": "^[\\w-_]+$",
+      "ConstraintDescription": "must consist of alphanumeric characters, -, or _"
+    },
+
+    "LdapDBReaders": {
+      "Description": "comma separated list of usernames to be inserted into the DB Reader LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapDBWriters": {
+      "Description": "comma separated list of usernames to be inserted into the DB Writer LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "LdapAdmins": {
+      "Description": "comma separated list of usernames to be inserted into the administrator LDAP group",
+      "Type": "String",
+      "Default": "user01,user02",
+      "AllowedPattern": "^[\\w-_]+(?:,[\\w-_]+)*$",
+      "ConstraintDescription": "usernames must be alphanumeric characters, -, and _"
+    },
+
+    "AuthButtercupMasterPassword": {
+      "Description": "Password to access the Buttercup password vault",
+      "Type": "String",
+      "Default": "srirachaBear",
+      "AllowedPattern": "^\\S+$",
+      "ConstraintDescription": "must be a non-whitespace string"
+    },
+
+    "AuthButtercupGroupName": {
+      "Description": "Group in the Buttercup vault where valid passwords are kept",
+      "Type": "String",
+      "Default": "General",
+      "AllowedPattern": "^\\w+$",
+      "ConstraintDescription": "must be an alphanumeric string"
+    },
+
+    "AuthButtercupFile": {
+      "Description": "The path to the Buttercup password vault file",
+      "Type": "String",
+      "Default": "/opt/auth-demo/share/auth-server/authPasswords.bcup",
+      "AllowedPattern": "^\\/.+(?:\\/.+)+\\/*$",
+      "ConstraintDescription": "must be a valid Linux path"
+    },
+
+    "AuthButtercupReaderAttrName": {
+      "Description": "The Buttercup record attribute indicating DB Reader permission",
+      "Type": "String",
+      "Default": "db_reader",
+      "AllowedPattern": "^[\\w_\\-=]+$",
+      "ConstraintDescription": "must be consists of alphanumeric characters or _, -, or ="
+    },
+
+    "AuthButtercupWriterAttrName": {
+      "Description": "The Buttercup record attribute indicating DB Writer permission",
+      "Type": "String",
+      "Default": "db_writer",
+      "AllowedPattern": "^[\\w_\\-=]+$",
+      "ConstraintDescription": "must be consists of alphanumeric characters or _, -, or ="
+    },
+
+    "AuthServerPort": {
+      "Description": "The number of the TCP port used to communicate with the authentication REST server",
+      "Type": "Number",
+      "Default": 12123,
+      "ConstraintDescription": "must be an integer"
+    },
+
+    "SSHLocation" : {
+      "Description" : " The IP address range that can be used to SSH to the EC2 instances",
+      "Type": "String",
+      "MinLength": "9",
+      "MaxLength": "18",
+      "Default": "0.0.0.0/0",
+      "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+      "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+    },
+
+    "S3RpmRepo": {
+      "Description" : "URL of the S3 RPM repo that holds stack RPMs",
+      "Type": "String",
+      "Default": "http://my-rpm-repo.s3-website-us-west-2.amazonaws.com/my-rpm-repo.repo",
+      "ConstraintDescription" : "must a http URL for a RPM repo"
+    }
+  },
+
+  "Resources": {
+     "LdapTierStack": {
+        "Type": "AWS::CloudFormation::Stack",
+        "Properties": {
+           "TemplateURL": { "Fn::Join": [ "", [
+              "https://", { "Ref": "TemplateS3Bucket" },
+              ".s3.us-west-2.amazonaws.com/",
+              { "Ref": "TemplateS3BucketPath" }, "/ldap-server.template"
+           ]]},
+           "Parameters": {
+              "KeyName": { "Ref": "KeyName" },
+              "LdapDomainDN": { "Ref": "LdapDomainDN" },
+              "LdapAdminPassword": { "Ref": "EncryptedLdapAdminPassword" },
+              "LdapOrg": { "Ref": "LdapOrg" },
+              "LdapUsers": { "Ref": "LdapUsers" },
+              "LdapPasswords": { "Ref": "LdapPasswords" },
+              "LdapReaderGroup": { "Ref": "LdapReaderGroup" },
+              "LdapWriterGroup": { "Ref": "LdapWriterGroup" },
+              "LdapAdminGroup": { "Ref": "LdapAdminGroup" },
+              "LdapDBReaders": { "Ref": "LdapDBReaders" },
+              "LdapDBWriters": { "Ref": "LdapDBWriters" },
+              "LdapAdmins": { "Ref": "LdapAdmins" },
+              "SSHLocation": { "Ref": "SSHLocation" },
+              "S3RpmRepo": { "Ref": "S3RpmRepo" }
+           }
+        }
+     },
+     "AuthTierStack": {
+        "Type": "AWS::CloudFormation::Stack",
+        "Properties": {
+           "TemplateURL": { "Fn::Join": [ "", [
+              "https://", { "Ref": "TemplateS3Bucket" },
+              ".s3.", { "Ref": "TemplateS3BucketRegion" }, ".amazonaws.com/",
+              { "Ref": "TemplateS3BucketPath" }, "/auth-server.template"
+           ]]},
+           "Parameters": {
+              "KeyName": { "Ref": "KeyName" },
+              "AuthButtercupMasterPassword": { "Ref": "AuthButtercupMasterPassword" },
+              "AuthButtercupGroupName": { "Ref": "AuthButtercupGroupName" },
+              "AuthButtercupFile": { "Ref": "AuthButtercupFile" },
+              "AuthButtercupReaderAttrName": { "Ref": "AuthButtercupReaderAttrName" },
+              "AuthButtercupWriterAttrName": { "Ref": "AuthButtercupWriterAttrName" },
+              "LdapServerAddr": { "Fn::GetAtt": [ "LdapTierStack", "Outputs.LdapPrivateDnsName" ] },
+              "LdapServerSecurityGroupId": { "Fn::GetAtt": [ "LdapTierStack", "Outputs.LdapSecurityGroup" ] },
+              "LdapDomainDN": { "Ref": "LdapDomainDN" },
+              "LdapAdminPassword": { "Ref": "PlaintextLdapAdminPassword" },
+              "LdapReaderGroupName": { "Ref": "LdapReaderGroup" },
+              "LdapWriterGroupName": { "Ref": "LdapWriterGroup" },
+              "SSHLocation": { "Ref": "SSHLocation" },
+              "S3RpmRepo": { "Ref": "S3RpmRepo" }
+           }
+        }
+     },
+     "CaddyTierStack": {
+        "Type": "AWS::CloudFormation::Stack",
+        "Properties": {
+           "TemplateURL": { "Fn::Join": [ "", [
+              "https://", { "Ref": "TemplateS3Bucket" },
+              ".s3.us-west-2.amazonaws.com/",
+              { "Ref": "TemplateS3BucketPath" }, "/caddy-server.template"
+           ]]},
+           "Parameters": {
+              "KeyName": { "Ref": "KeyName" },
+              "AuthServerAddr": { "Fn::GetAtt": [ "AuthTierStack", "Outputs.AuthPrivateDnsName" ] },
+              "AuthServerPort": { "Ref": "AuthServerPort" },
+              "AuthServerSecurityGroupId": { "Fn::GetAtt": [ "AuthTierStack", "Outputs.AuthSecurityGroup" ] },
+              "SSHLocation": { "Ref": "SSHLocation" },
+              "S3RpmRepo": { "Ref": "S3RpmRepo" }
+           }
+        }
+     }
+  },
+  "Outputs": {
+    "CaddyServerURL": {
+       "Description": "URL for the stack Caddy Server",
+       "Value": { "Fn::GetAtt": [ "CaddyTierStack", "Outputs.CaddyServerURL" ] }
+    }
+  }
+}

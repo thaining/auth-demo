@@ -1,0 +1,57 @@
+This document provides samples of the steps necessary to set up a Amazon S3 bucket for use as
+a location to store nested CloudFormation templates for the three tiers of the auth-demo
+project. The procedure describes how to create a S3 Bucket, enable web site hosting on it,
+add a necessary folder to the bucket, copy templates into that folder, and then enter the
+properties of the bucket into the auth-demo top level template.
+
+Phase 1. Prepare the S3 bucket.
+
+These steps are performed from the AWS S3 console.
+
+a) Create the S3 bucket and give it a name.
+
+   i. Click "Create bucket" on the "Amazon S3 > Buckets" page.  The "Create bucket" screen appears.
+   ii. Enter a bucket name ("my-rpm-repo").
+   iii. Choose an appropriate regiion ("us-west-2").
+   iv. Choose "ACLs disabled" under Object Ownership.
+   v. Deselect "Block all public access" to allow limited public access (a rule to limit it to AWS
+   access only will be created shortly.) Check the acknowledgement box.
+   vi. Disable "Bucket Versioning".
+   vii. Add an appropriate tag.
+   viii. Set "Encryption key type" to an appropriate value.
+   ix. Click "Create bucket".  The "Create bucket" screen closes.
+
+b) Enable Static website hosting for the bucket.
+
+   i. On the "Amazon S3 > Buckets" page, click on the name of the bucket created in Step a).
+   ii. Click on the Properties tab. Find "Static website hosting" at the bottom of the screen. Click "Edit". The "Edit static website hosting" screen appears.
+   iii. Under "Statc website hosting", click the Enable radio button.
+   iv. Set the "Index document" field to "index.html".
+   v.  Click the "Save changes" button.
+
+c) Add a folder to the S3 bucket.
+
+   i. On the "Amazon S3 >  Buckets" page, click on the name of the bucket created in Step a).
+   ii. Click on the Objects tab.
+   iii. Click on the "Create folder" button.  The "Create folder" screen appears.
+   iv. Enter a name in the "Folder Name".
+   v. (Optional) Adjust the server-side encryption, if necessary.
+   vi. Click the "Create folder" button.  The "Create folder" screen closes.
+
+Phase 2. Copy templates to the folder in the bucket
+
+   i. Run the commands from the command line:
+     aws s3 cp auth-rpm/auth-server.template s3://the-bucket-name/the-folder-name
+     aws s3 cp caddy-rpm/caddy-server.template s3://the-bucket-name/the-folder-name
+     aws s3 cp ldap-rpm/ldap-server.template s3://the-bucket-name/the-folder-name
+
+Phase 3.  Enter the address elements into auth-demo.template
+
+   i. On the "Cloudformation > Stacks > Create stack" page, click the "Upload a template file" button
+   ii. Click the "Choose file" button and a popup window appears.
+   iii. Select auth-demo.template and click the Open button.  The popup window closes and S3 URL on
+   the Create Stack page is populated.
+   iv. Click Next.
+   v. Enter the bucket name from Phase 1. a) in the TemplateS3Bucket field.
+   vi. Enter the folder name from Phase 1. c) in the TemplateS3BucketPath field.
+   vii. Set TemplateS3BucketRegion to the AWS region where the bucket is located.

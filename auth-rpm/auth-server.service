@@ -1,0 +1,28 @@
+[Unit]
+Description=a nodejs microservice for an authentication REST interface
+Documentation=https://github.com/thaining/auth-demo
+After=network-online.target
+Wants=netowrk-online.target
+
+[Service]
+Restart=always
+RestartSec=5
+CPUAccounting=true
+MemoryAccounting=true
+User=auth-server
+Group=auth-server
+
+Environment=NODE_PATH=/opt/auth-demo/share/auth-server/node_modules
+EnvironmentFile=/opt/auth-demo/etc/auth-server
+
+PassEnvironment=NODE_PATH AUTH_CONFIG_PATH AUTH_PUBLIC_KEY AUTH_PRIVATE_KEY AUTH_BCUP_MASTER_PASSWORD AUTH_BCUP_GROUP_NAME AUTH_BCUP_FILE_NAME AUTH_BCUP_DBREADER_NAME AUTH_BCUP_DBWRITER_NAME
+
+ExecStart=/usr/bin/node /opt/auth-demo/share/auth-server/authServer.js
+
+TimeoutStopSec=5s
+
+LimitNOFILE=32768
+LimitNPROC=65536
+
+[Install]
+WantedBy=multi-user.target
